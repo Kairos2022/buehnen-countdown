@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bühnen-Countdown</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap">
+<style>
+/* Layout: one full-screen stage — the time fills the room, controls sit in a dock that fades out while the talk runs. */
+:root {
+  color-scheme: dark;
+  --ink: #f4f6f2;
+  --ink-dim: rgba(244, 246, 242, .62);
+  --stage-idle: #1b1f1d;
+  --stage-ok: #0e5a3a;
+  --stage-warn: #f0b323;
+  --stage-crit: #c4161c;
+  --stage-over: #8f0d12;
+  --ink-on-warn: #1d1606;
+  --dock: rgba(12, 14, 13, .82);
+  --dock-line: rgba(255, 255, 255, .12);
+  --field: rgba(255, 255, 255, .07);
+  --field-line: rgba(255, 255, 255, .18);
+  --focus: #8fd3ff;
+  --font-display: "Barlow Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif;
+  --font-ui: "Barlow", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --stage: var(--stage-idle);
+  --fg: var(--ink);
+}
+html, body { height: 100%; }
+body {
+  margin: 0;
+  background: var(--stage);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: 15px;
+  overflow: hidden;
+  transition: background-color .7s ease, color .7s ease;
+}
+body[data-phase="ok"]   { --stage: var(--stage-ok); }
+body[data-phase="warn"] { --stage: var(--stage-warn); --fg: var(--ink-on-warn); }
+body[data-phase="crit"] { --stage: var(--stage-crit); }
+body[data-phase="over"] { --stage: var(--stage-over); }
+
+.app {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 12px;
+  box-sizing: border-box;
+}
+
+/* Top line */
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 13px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  opacity: .78;
+  transition: opacity .4s;
+}
+.top .state { font-weight: 600; }
+.top .meta { font-variant-numeric: tabular-nums; }
+
+/* Stage */
+.stage {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+  position: relative;
+}
+.clock {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: .9;
+  font-size: min(30vw, 58vh);
+  letter-spacing: -.01em;
+  white-space: nowrap;
+  user-select: none;
+}
+.clock.long { font-size: min(24vw, 54vh); }
+.clock .sign { opacity: .85; }
+body[data-phase="over"] .clock { animation: pulse 1s steps(2, jump-none) infinite; }
+@keyframes pulse { 50% { opacity: .35; } }
+
+.progress {
+  position: absolute;
+  left: 0; right: 0; bottom: 6px;
+  height: 6px;
+  background: currentColor;
+  opacity: .16;
+  border-radius: 3px;
+}
+.progress-fill {
+  position: absolute;
+  left: 0; bottom: 6px;
+  height: 6px;
+  width: 100%;
+  background: currentColor;
+  opacity: .7;
+  border-radius: 3px;
+  transform-origin: left center;
+}
+
+/* Dock */
+.dock {
+  margin-top: 12px;
+  background: var(--dock);
+  color: var(--ink);
+  border: 1px solid var(--dock-line);
+  border-radius: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+  transition: opacity .4s, transform .4s;
+  backdrop-filter: blur(8px);
+}
+body.hide-ui .dock, body.hide-ui .top { opacity: 0; pointer-events: none; }
+body.hide-ui .dock { transform: translateY(12px); }
+body.hide-ui { cursor: none; }
+
+.row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+.row.split { justify-content: space-between; }
+
+.group-label {
+  font-size: 11px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  margin-bottom: 6px;
+}
+
+button {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-line);
+  border-radius: 9px;
+  padding: 9px 14px;
+  cursor: pointer;
+  min-height: 40px;
+  font-variant-numeric: tabular-nums;
+}
+button:hover:not(:disabled) { background: rgba(255,255,255,.14); }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+button.primary {
+  background: var(--ink);
+  color: #101211;
+  border-color: var(--ink);
+  min-width: 120px;
+}
+button.primary:hover:not(:disabled) { background: #fff; }
+button[aria-pressed="true"] { background: rgba(255,255,255,.2); border-color: rgba(255,255,255,.5); }
+.presets button { padding-inline: 12px; min-width: 52px; }
+.presets button.active { background: var(--stage-ok); border-color: #3fae7c; }
+
+.field { display: grid; gap: 4px; }
+.field span { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink-dim); }
+.field-row { display: flex; align-items: center; gap: 6px; }
+input[type="number"] {
+  font: inherit;
+  font-family: var(--font-display);
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  width: 3.6ch;
+  padding: 4px 8px;
+  color: var(--ink);
+  background: var(--field);
+  border: 1px solid var(--field-line);
+  border-radius: 8px;
+  text-align: right;
+}
+input[type="number"].wide { width: 4.4ch; }
+input:disabled { opacity: .45; }
+.colon { font-family: var(--font-display); font-size: 22px; color: var(--ink-dim); }
+.swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: 0; }
+.hint { font-size: 12px; color: var(--ink-dim); }
+.hint kbd {
+  font-family: var(--font-ui);
+  font-size: 11px;
+  border: 1px solid var(--field-line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-inline: 2px;
+}
+.error { color: #ffb4a8; font-size: 12px; min-height: 1em; }
+
+@media (max-width: 640px) {
+  .dock { padding: 12px; gap: 12px; }
+  .hint { display: none; }
+  .clock { font-size: min(26vw, 40vh); }
+  .clock.long { font-size: min(21vw, 38vh); }
+}
+@media (prefers-reduced-motion: reduce) {
+  body, .dock, .top { transition: none; }
+  body[data-phase="over"] .clock { animation: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header class="top">
+    <span class="state" id="stateLabel">Bereit</span>
+    <span class="meta" id="metaLabel">Ziel 45:00</span>
+  </header>
+
+  <main class="stage">
+    <div class="clock" id="clock" role="timer" aria-live="off">45:00</div>
+    <div class="progress" aria-hidden="true"></div>
+    <div class="progress-fill" id="progressFill" aria-hidden="true"></div>
+  </main>
+
+  <section class="dock" id="dock" aria-label="Steuerung">
+    <div class="row split">
+      <div>
+        <div class="group-label">Schnellwahl (Minuten)</div>
+        <div class="row presets" id="presets"></div>
+      </div>
+    </div>
+
+    <div class="row split">
+      <div class="row">
+        <label class="field">
+          <span>Dauer (max. 120:00)</span>
+          <span class="field-row">
+            <input type="number" class="wide" id="durMin" min="0" max="120" step="1" value="45" aria-label="Minuten">
+            <span class="colon">:</span>
+            <input type="number" id="durSec" min="0" max="59" step="1" value="0" aria-label="Sekunden">
+          </span>
+        </label>
+        <label class="field">
+          <span><i class="swatch" style="background:var(--stage-warn)"></i>Gelb ab</span>
+          <span class="field-row">
+            <input type="number" class="wide" id="warnMin" min="0" max="120" step="1" value="5" aria-label="Gelb ab Minuten">
+            <span class="colon">:</span>
+            <input type="number" id="warnSec" min="0" max="59" step="1" value="0" aria-label="Gelb ab Sekunden">
+          </span>
+        </label>
+        <label class="field">
+          <span><i class="swatch" style="background:var(--stage-crit)"></i>Rot ab</span>
+          <span class="field-row">
+            <input type="number" class="wide" id="critMin" min="0" max="120" step="1" value="1" aria-label="Rot ab Minuten">
+            <span class="colon">:</span>
+            <input type="number" id="critSec" min="0" max="59" step="1" value="0" aria-label="Rot ab Sekunden">
+          </span>
+        </label>
+      </div>
+      <div class="row">
+        <button id="btnMinus" title="Eine Minute abziehen (Pfeil runter)">−1 min</button>
+        <button id="btnPlus" title="Eine Minute dazugeben (Pfeil hoch)">+1 min</button>
+        <button id="btnReset" title="Zurücksetzen (R)">Zurücksetzen</button>
+        <button id="btnStart" class="primary" title="Start / Pause (Leertaste)">Start</button>
+      </div>
+    </div>
+
+    <div class="row split">
+      <div class="row">
+        <button id="btnSound" aria-pressed="true" title="Gong bei 0:00">Gong an</button>
+        <button id="btnFull" title="Vollbild (F)">Vollbild</button>
+      </div>
+      <div class="hint">
+        <kbd>Leertaste</kbd> Start/Pause · <kbd>R</kbd> Reset · <kbd>↑</kbd><kbd>↓</kbd> ±1 min · <kbd>F</kbd> Vollbild
+      </div>
+    </div>
+    <div class="error" id="error" role="status"></div>
+  </section>
+</div>
+
+<script>
+(() => {
+  const MAX_SEC = 120 * 60;
+  const PRESETS = [5, 10, 15, 18, 20, 30, 45, 60, 90, 120];
+  const $ = id => document.getElementById(id);
+
+  const el = {
+    clock: $("clock"), fill: $("progressFill"), state: $("stateLabel"), meta: $("metaLabel"),
+    presets: $("presets"), error: $("error"),
+    durMin: $("durMin"), durSec: $("durSec"), warnMin: $("warnMin"), warnSec: $("warnSec"),
+    critMin: $("critMin"), critSec: $("critSec"),
+    start: $("btnStart"), reset: $("btnReset"), plus: $("btnPlus"), minus: $("btnMinus"),
+    sound: $("btnSound"), full: $("btnFull"),
+  };
+
+  const s = {
+    duration: 45 * 60,   // gesetzte Dauer in Sekunden
+    warn: 5 * 60,
+    crit: 60,
+    sound: true,
+    running: false,
+    started: false,
+    endAt: 0,            // Zeitstempel (ms), wann 0:00 erreicht wird
+    remainingMs: 45 * 60 * 1000,
+    gonged: false,
+  };
+
+  // Gespeicherte Einstellungen laden (optional)
+  try {
+    const saved = JSON.parse(localStorage.getItem("buehnen-countdown") || "null");
+    if (saved) {
+      if (Number.isFinite(saved.duration)) s.duration = clamp(saved.duration, 1, MAX_SEC);
+      if (Number.isFinite(saved.warn)) s.warn = clamp(saved.warn, 0, MAX_SEC);
+      if (Number.isFinite(saved.crit)) s.crit = clamp(saved.crit, 0, MAX_SEC);
+      if (typeof saved.sound === "boolean") s.sound = saved.sound;
+      s.remainingMs = s.duration * 1000;
+    }
+  } catch (e) {}
+
+  function save() {
+    try {
+      localStorage.setItem("buehnen-countdown", JSON.stringify({
+        duration: s.duration, warn: s.warn, crit: s.crit, sound: s.sound,
+      }));
+    } catch (e) {}
+  }
+
+  function clamp(v, lo, hi) { return Math.min(hi, Math.max(lo, v)); }
+  function fmt(totalSec) {
+    const m = Math.floor(totalSec / 60), sec = totalSec % 60;
+    return String(m).padStart(2, "0") + ":" + String(sec).padStart(2, "0");
+  }
+
+  // --- Presets ---
+  PRESETS.forEach(min => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = min;
+    b.dataset.min = min;
+    b.title = min + " Minuten";
+    b.addEventListener("click", () => setDuration(min * 60));
+    el.presets.appendChild(b);
+  });
+
+  function setDuration(sec) {
+    if (s.started) return;
+    s.duration = clamp(Math.round(sec), 1, MAX_SEC);
+    s.remainingMs = s.duration * 1000;
+    s.gonged = false;
+    syncInputs();
+    save();
+    render();
+  }
+
+  function syncInputs() {
+    el.durMin.value = Math.floor(s.duration / 60);
+    el.durSec.value = s.duration % 60;
+    el.warnMin.value = Math.floor(s.warn / 60);
+    el.warnSec.value = s.warn % 60;
+    el.critMin.value = Math.floor(s.crit / 60);
+    el.critSec.value = s.crit % 60;
+    el.sound.setAttribute("aria-pressed", String(s.sound));
+    el.sound.textContent = s.sound ? "Gong an" : "Gong aus";
+  }
+
+  function readPair(minEl, secEl) {
+    const m = parseInt(minEl.value, 10) || 0;
+    const sec = parseInt(secEl.value, 10) || 0;
+    return clamp(m, 0, 120) * 60 + clamp(sec, 0, 59);
+  }
+
+  function onDurationInput() {
+    let total = readPair(el.durMin, el.durSec);
+    el.error.textContent = "";
+    if (total > MAX_SEC) {
+      total = MAX_SEC;
+      el.error.textContent = "Maximal 120 Minuten möglich – auf 120:00 gesetzt.";
+    }
+    if (total < 1) {
+      el.error.textContent = "Bitte mindestens 1 Sekunde einstellen.";
+      return;
+    }
+    setDuration(total);
+  }
+  function onDurationCommit() {
+    syncInputs(); // normalisiert z. B. 75 Sekunden zu 01:15 bzw. 130 min zu 120
+  }
+  function onThresholdInput() {
+    s.warn = clamp(readPair(el.warnMin, el.warnSec), 0, MAX_SEC);
+    s.crit = clamp(readPair(el.critMin, el.critSec), 0, MAX_SEC);
+    save();
+    render();
+  }
+
+  [el.durMin, el.durSec].forEach(i => {
+    i.addEventListener("input", onDurationInput);
+    i.addEventListener("change", onDurationCommit);
+  });
+  [el.warnMin, el.warnSec, el.critMin, el.critSec].forEach(i => {
+    i.addEventListener("input", onThresholdInput);
+    i.addEventListener("change", syncInputs);
+  });
+
+  // --- Steuerung ---
+  function currentRemainingMs() {
+    return s.running ? s.endAt - performance.now() : s.remainingMs;
+  }
+
+  function start() {
+    if (s.running) return;
+    s.endAt = performance.now() + s.remainingMs;
+    s.running = true;
+    s.started = true;
+    unlockAudio();
+    requestWakeLock();
+    scheduleHide();
+    render();
+  }
+  function pause() {
+    if (!s.running) return;
+    s.remainingMs = s.endAt - performance.now();
+    s.running = false;
+    showUi();
+    render();
+  }
+  function toggle() { s.running ? pause() : start(); }
+  function reset() {
+    s.running = false;
+    s.started = false;
+    s.gonged = false;
+    s.remainingMs = s.duration * 1000;
+    releaseWakeLock();
+    showUi();
+    render();
+  }
+  function adjust(deltaSec) {
+    // Verbleibende Zeit um eine Minute ändern, Gesamtzeit bleibt unter 120 Minuten.
+    if (!s.started) {
+      setDuration(clamp(s.duration + deltaSec, 60, MAX_SEC));
+      return;
+    }
+    const rem = currentRemainingMs();
+    const next = clamp(rem + deltaSec * 1000, -Infinity, MAX_SEC * 1000);
+    if (s.running) s.endAt += next - rem; else s.remainingMs = next;
+    if (next > 0) s.gonged = false;
+    render();
+  }
+
+  el.start.addEventListener("click", toggle);
+  el.reset.addEventListener("click", reset);
+  el.plus.addEventListener("click", () => adjust(60));
+  el.minus.addEventListener("click", () => adjust(-60));
+  el.sound.addEventListener("click", () => {
+    s.sound = !s.sound;
+    if (s.sound) unlockAudio();
+    syncInputs();
+    save();
+  });
+  el.full.addEventListener("click", toggleFullscreen);
+
+  document.addEventListener("keydown", e => {
+    if (e.target instanceof HTMLInputElement) {
+      if (e.key === "Enter") { e.target.blur(); start(); }
+      return;
+    }
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    switch (e.key) {
+      case " ": e.preventDefault(); toggle(); break;
+      case "r": case "R": reset(); break;
+      case "f": case "F": toggleFullscreen(); break;
+      case "ArrowUp": e.preventDefault(); adjust(60); break;
+      case "ArrowDown": e.preventDefault(); adjust(-60); break;
+      default: showUi(); scheduleHide();
+    }
+  });
+
+  // --- Vollbild ---
+  function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        const p = document.documentElement.requestFullscreen?.();
+        if (p && p.catch) p.catch(() => { el.error.textContent = "Vollbild ist in dieser Ansicht nicht verfügbar."; });
+        else if (!p) el.error.textContent = "Vollbild ist in dieser Ansicht nicht verfügbar.";
+      }
+    } catch (e) {
+      el.error.textContent = "Vollbild ist in dieser Ansicht nicht verfügbar.";
+    }
+  }
+  document.addEventListener("fullscreenchange", () => {
+    el.full.textContent = document.fullscreenElement ? "Vollbild beenden" : "Vollbild";
+  });
+
+  // --- Bedienelemente ausblenden, solange der Timer läuft ---
+  let hideTimer = 0;
+  function showUi() {
+    document.body.classList.remove("hide-ui");
+    clearTimeout(hideTimer);
+  }
+  function scheduleHide() {
+    clearTimeout(hideTimer);
+    if (!s.running) return;
+    hideTimer = setTimeout(() => {
+      if (s.running && !document.querySelector(".dock:focus-within input")) {
+        document.body.classList.add("hide-ui");
+      }
+    }, 3000);
+  }
+  ["mousemove", "pointerdown", "touchstart"].forEach(t =>
+    document.addEventListener(t, () => { showUi(); scheduleHide(); }, { passive: true }));
+
+  // --- Bildschirm wach halten ---
+  let wakeLock = null;
+  async function requestWakeLock() {
+    try { if ("wakeLock" in navigator && !wakeLock) wakeLock = await navigator.wakeLock.request("screen"); }
+    catch (e) { wakeLock = null; }
+  }
+  function releaseWakeLock() {
+    try { wakeLock?.release(); } catch (e) {}
+    wakeLock = null;
+  }
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && s.running) { wakeLock = null; requestWakeLock(); }
+  });
+
+  // --- Gong ---
+  let audio = null;
+  function unlockAudio() {
+    try {
+      if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+      if (audio.state === "suspended") audio.resume();
+    } catch (e) { audio = null; }
+  }
+  function gong() {
+    if (!s.sound || !audio) return;
+    const t = audio.currentTime;
+    [[392, 0], [523.25, .02], [784, .04]].forEach(([f, d]) => {
+      const o = audio.createOscillator(), g = audio.createGain();
+      o.type = "sine";
+      o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t + d);
+      g.gain.exponentialRampToValueAtTime(0.28, t + d + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + d + 2.6);
+      o.connect(g).connect(audio.destination);
+      o.start(t + d);
+      o.stop(t + d + 2.7);
+    });
+  }
+
+  // --- Anzeige ---
+  const STATE_TEXT = { idle: "Bereit", ok: "Läuft", warn: "Gleich vorbei", crit: "Letzte Minute", over: "Zeit überschritten" };
+
+  function render() {
+    const rem = currentRemainingMs();
+    let text, phase;
+
+    if (rem > 0) {
+      const secLeft = Math.ceil(rem / 1000);
+      text = fmt(secLeft);
+      if (!s.started) phase = "idle";
+      else if (secLeft <= s.crit) phase = "crit";
+      else if (secLeft <= s.warn) phase = "warn";
+      else phase = "ok";
+    } else {
+      const over = Math.floor(-rem / 1000);
+      text = '<span class="sign">−</span>' + fmt(over);
+      phase = "over";
+      if (s.running && !s.gonged) { s.gonged = true; gong(); }
+    }
+
+    if (el.clock.innerHTML !== text) el.clock.innerHTML = text;
+    el.clock.classList.toggle("long", text.replace(/<[^>]+>/g, "").length > 5);
+    document.body.dataset.phase = phase;
+
+    let label = STATE_TEXT[phase];
+    if (phase === "crit") label = Math.ceil(rem / 1000) > 60 ? "Endspurt" : "Letzte Minute";
+    if (s.started && !s.running) label = "Pausiert";
+    el.state.textContent = label;
+    el.meta.textContent = "Ziel " + fmt(s.duration);
+
+    const frac = clamp(rem / (s.duration * 1000), 0, 1);
+    el.fill.style.transform = "scaleX(" + frac + ")";
+
+    el.start.textContent = s.running ? "Pause" : (s.started ? "Weiter" : "Start");
+    const lock = s.started;
+    [el.durMin, el.durSec].forEach(i => i.disabled = lock);
+    el.presets.querySelectorAll("button").forEach(b => {
+      b.disabled = lock;
+      b.classList.toggle("active", Number(b.dataset.min) * 60 === s.duration);
+    });
+    document.title = s.started ? el.clock.textContent + " · Bühnen-Countdown" : "Bühnen-Countdown";
+  }
+
+  function loop() {
+    if (s.running) render();
+    requestAnimationFrame(loop);
+  }
+  // Fallback, falls requestAnimationFrame im Hintergrund pausiert (Gong trotzdem pünktlich)
+  setInterval(() => { if (s.running && document.hidden) render(); }, 250);
+
+  syncInputs();
+  render();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
